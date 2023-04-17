@@ -1,0 +1,2193 @@
+---
+title: "Bachelorarbeit"
+author: "Christian Steuer"
+date: "2022-04-14"
+output:
+  html_document:
+    toc: yes
+    df_print: paged
+  html_notebook:
+    df_print: paged
+    toc: yes
+    toc_float: yes
+editor_options:
+  markdown:
+    wrap: 72
+  chunk_output_type: inline
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(
+tidy=FALSE)  # global chunk option to allow line breaks in code chunks
+knitr::opts_chunk$set(warning = FALSE) # global chunk option to disable the output of warnings because ggqqplots scatter the console output because of missing labels
+
+```
+
+# 0. Preface
+
+This R-Markdown file will serve as a base file for all statistical
+computations and tests of my bachelor thesis.
+
+\- Christian Steuer
+
+# 1. Installation of R packages
+
+Install necessary library's
+
+```{r}
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(dplyr, tidyr, readxl, lubridate, ggplot2, ggrepel, ggforce, ggcorrplot, ggpubr, FactoMineR, car, rcompanion, stringr, cowplot)
+```
+
+```{r}
+sessionInfo() #get session info
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+| Package    | Description / uses                                                 |
+|------------|--------------------------------------------------------------------|
+| pacman     | tool for package organization                                      |
+| readxl     | tool to read MS Excel files into dataframes                        |
+| dplyr      | toolkit for data manipulation                                      |
+| tidyr      | toolkit for data manipulation especially data frames               |
+| stringr    | toolkit for string manipulation                                    |
+| lubridate  | toolkit for date manipulation                                      |
+| car        | used for descriptive data analysis                                 |
+| rcompanion | used for Tukey-post-hoc-testings                                   |
+| factoMineR | used for pairwise-testings                                         |
+| ggplot2    | base package for plots                                             |
+| ggrepel    | additional package to ggplot for better repel test/points in plots |
+| ggforce    | used to draw circles in PCA plot                                   |
+| ggcorrplot | additional package to ggplot used for correlation plots            |
+| cowplot    | tool to fuse multiple plots into one                               |
+
+: Package use explanation
+
+# 2. Import data sets
+
+## Dualex
+
+```{r message=FALSE}
+user <- Sys.getenv("USERNAME")
+path1 <- file.path("C:/Users/")
+path2 <- file.path("/Nextcloud/2022 VP Tomato Grafting/Langzeitversuch/Dualex/20220714 Dualex complete.xlsx")
+dlx_path <- file.path(path1, user, path2)
+
+df_dualex <- read_excel(dlx_path, skip = 4)
+rm(list = "user", "path1", "path2", "dlx_path") #  remove unecessary helper variables
+
+df_dualex <- df_dualex %>%
+  dplyr::select(date, plantID, graft, treatment, Chl, Flav, Anth) %>%  # only select necessery columns
+  group_by(date, plantID) %>%
+  mutate(Chl = mean(Chl),  # group technical replicas into a single  plantID by mean
+            Flav = mean(Flav),
+            Anth = mean(Anth))
+df_dualex
+```
+
+## leaf colour
+
+```{r message=FALSE}
+user <- Sys.getenv("USERNAME")
+path1 <- file.path("C:/Users/")
+path2 <- file.path("/Nextcloud/2022 VP Tomato Grafting/Langzeitversuch/Blattfarbe/20220714_Blattfarbe complete.xlsx")
+lc_path <- file.path(path1, user, path2)
+
+df_lc <- read_excel(lc_path, skip = 3)
+rm(list = "user", "path1", "path2", "lc_path") #  remove unecessary helper variables
+
+df_lc <- df_lc %>%
+  dplyr::select(date, plantID, graft, treatment, h) %>%  # only select necessery columns
+  group_by(date, plantID) %>%
+  summarise(hue = mean(h))  # group technical replicas into a single  plantID by mean
+df_lc
+```
+
+## biomass
+
+```{r message=FALSE}
+user <- Sys.getenv("USERNAME")
+path1 <- file.path("C:/Users/")
+path2 <- file.path("/Nextcloud/2022 VP Tomato Grafting/Langzeitversuch/Biomasse/20220704_Biomass_complete.xlsx")
+harvest_path <- file.path(path1, user, path2)
+
+df_fw_harvest <- read_excel(harvest_path, sheet = "FM harvest")
+
+df_fw_harvest <- df_fw_harvest %>%
+  rename(biomass = "Spross gesamt FW [g]",
+         fw_sample = "Unterprobe FW [g]") %>%
+  dplyr::select (plantID, graft, treatment, biomass, fw_sample) %>%  # only select necessery columns
+  group_by(plantID, .drop = FALSE)
+
+
+df_dw_harvest <- read_excel(harvest_path, sheet = "DW Unterprobe und Rst")
+
+df_dw_harvest <- df_dw_harvest %>%
+  rename(dw_sample = "Unterprobe [g]") %>%
+  dplyr::select (plantID, dw_sample) %>%  # only select necessery columns
+  group_by(plantID, .drop = FALSE)
+
+df_dw_leaves <- read_excel(harvest_path, sheet = "DW Leaves")
+
+df_dw_leaves <- df_dw_leaves %>%
+  rename(dw_leaves = "DW leaves [g]") %>%
+  dplyr::select (date, plantID, dw_leaves) %>%  # only select necessery columns
+  group_by(plantID) %>%
+  summarise(dw_leaves = mean(dw_leaves))  # group technical replicas into a single  plantID by mean
+
+df_dw_roots <- read_excel(harvest_path, sheet = "DW roots")
+
+rm(list = "user", 
+   "path1", 
+   "path2", 
+   "harvest_path") #  remove unecessary helper variables
+
+df_dw_roots <- df_dw_roots %>%
+  rename(dw_roots = "total DM [g]") %>%
+  dplyr::select (plantID, dw_roots) %>%  # only select necessery columns
+  group_by(plantID)
+
+# join all sample df's in one
+df_biomass <- left_join(df_fw_harvest, df_dw_harvest, by = "plantID") %>%
+  left_join(., df_dw_leaves, by = "plantID") %>%
+  left_join(., df_dw_roots, by = "plantID")
+
+df_biomass <- df_biomass %>%
+  dplyr::select(-dw_leaves) %>%
+  mutate(dw_pct = (dw_sample/fw_sample)*100, .keep = "unused")
+df_biomass
+```
+
+## ion leakage
+
+```{r}
+user <- Sys.getenv("USERNAME")
+path1 <- file.path("C:/Users/")
+path2 <- file.path("/Nextcloud/2022 VP Tomato Grafting/Langzeitversuch/Ion leakage/202200514_IonLeakage.xlsx")
+il_path <- file.path(path1, user, path2)
+
+df_il <- read_excel(il_path, sheet = "Raw")
+rm(list = "user", 
+   "path1", 
+   "path2", 
+   "il_path")
+
+df_il <- df_il %>%
+  rename(ion_leakage = "Ion Leakage - Blank [%]" ) %>%
+  dplyr::select (plantID, ion_leakage) %>%  # only select necessery columns
+  group_by(plantID, .drop = FALSE)
+df_il
+```
+
+## gas exchange
+
+```{r}
+user <- Sys.getenv("USERNAME")
+path1 <- file.path("C:/Users/")
+path2 <- file.path("/Nextcloud/2022 VP Tomato Grafting/Langzeitversuch/Gas Exchange/20220512 Gas Exchange complete.xlsx")
+gasex_path <- file.path(path1, user, path2)
+
+df_gasex <- read_excel(gasex_path, skip = 15)
+rm(list = "user", 
+   "path1", 
+   "path2", 
+   "gasex_path") #  remove unecessary helper variables
+
+df_gasex <- df_gasex %>%
+  dplyr::filter(light == "1000") %>%
+  dplyr::select(plantID, A, "Fv/Fm", PhiPS2, ETR, NPQ)
+df_gasex
+```
+
+## fruit harvest data
+
+```{r message=FALSE, warning=FALSE}
+user <- Sys.getenv("USERNAME")
+path1 <- file.path("C:/Users/")
+path2 <- file.path("/Nextcloud/2022 VP Tomato Grafting/Langzeitversuch/Ertrag - Blüte - Frucht/20220622 Fruchternte.xlsx")
+fruit_path <- file.path(path1, user, path2)
+
+df_fruit <- read_excel(fruit_path, 
+    col_types = c("numeric", "text", "text", 
+        "text", "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "text", "text"))
+
+rm(list = "user", 
+   "path1", 
+   "path2", 
+   "fruit_path") #  remove unecessary helper variables
+
+df_fruit <- df_fruit %>%
+  dplyr::filter (Fruchtstand == 1 | Fruchtstand == 2 | Fruchtstand == -2 | Fruchtstand == -1) %>%
+  dplyr::select(-Fruchtstand_orig, -Fruchtstand, -Datum, -"SPM [Probennummer]", -"TM [g]", -L, -a, -b, -L2, -C, -Remarks, -last_col()) %>% #  remove uneccesary columns
+  rename(anzahl = "Anzahl Früchte", #  rename columns to be compatible with mutate
+         gewicht = "Gewicht [g]",
+         brix = "Brix [% ]",
+         fw_sample = "Frucht-Unterprobe FM [g]",
+         dw_sample = "Frucht-Unterprobe TM [g]") %>%
+  mutate(dw_pct = (dw_sample/fw_sample)*100) %>% #  calculate dryweight percentage
+  group_by(plantID) %>%
+  summarise(fruit_count = sum(anzahl, na.rm = TRUE),
+            fruit_weight = sum(gewicht, na.rm = TRUE),
+            fruit_brix = mean(brix, na.rm = TRUE),
+            fruit_pH = mean(pH, na.rm = TRUE),
+            fruit_hue = mean(h, na.rm = TRUE),
+            fruit_dw_pct = mean(dw_pct, na.rm = TRUE)) #  group technical replicas into a single  plantID by mean
+df_fruit
+```
+
+# 3. join data sets
+
+modify dualex dataframe to be in wide format
+
+```{r message=FALSE}
+df_dualex <- df_dualex %>%
+  mutate(week = lubridate::week(ymd(date))) %>%
+  relocate(week, .after = date)
+df_dualex_wide <- df_dualex %>%
+  dplyr::select (week, plantID, Chl) %>%
+  group_by(week, plantID) %>%
+  summarise(Chl = mean(Chl)) %>%
+  pivot_wider(names_from = "week", values_from = c("Chl"), names_sep = ".", names_prefix = "chl_wk_")
+
+df_dualex_wide <- df_dualex %>%
+  dplyr::select (week, plantID, Anth) %>%
+  group_by(week, plantID) %>%
+  summarise(Anth = mean(Anth)) %>%
+  pivot_wider(names_from = "week", values_from = c("Anth"), names_sep = ".", names_prefix = "anth_wk_") %>%
+  left_join(., df_dualex_wide, by = "plantID")
+  
+df_dualex_wide <- df_dualex %>%
+  dplyr::select (week, plantID, Flav) %>%
+  group_by(week, plantID) %>%
+  summarise(Flav = mean(Flav)) %>%
+  pivot_wider(names_from = "week", values_from = c("Flav"), names_sep = ".", names_prefix = "flav_wk_") %>%
+  left_join(., df_dualex_wide, by = "plantID")
+
+df_dualex_wide <- df_dualex_wide %>%
+  dplyr::select(order(colnames(df_dualex_wide))) %>% #  order columns alphabetically
+  relocate(plantID) #  move column plantID to front
+```
+
+modify leafcolor dataframe to be in wide format
+
+```{r message=FALSE}
+df_lc <- df_lc %>%
+  mutate(week = lubridate::week(ymd(date))) %>%
+  relocate(week, .after = date)
+
+df_lc_wide <- df_lc %>%
+  dplyr::select (week, plantID, hue) %>%
+  group_by(week, plantID) %>%
+  summarise(hue = mean(hue)) %>%
+  pivot_wider(names_from = "week", values_from = c("hue"), names_sep = ".", names_prefix = "hue_wk_")
+```
+
+join biomass, ion leakage, gas exchange and dualex dataframes
+
+```{r}
+df_meas <- df_biomass %>%
+  dplyr::select(plantID) %>% #  select plantID as complete dataframe base
+  arrange(plantID) #  ascending order
+
+df_meas <- df_meas %>% #  join all measurement df's in one dataframe
+  left_join(., df_biomass, by = "plantID") %>%
+  left_join(., df_il, by = "plantID") %>%
+  left_join(., df_dualex_wide, by = "plantID") %>%
+  left_join(., df_lc_wide, by = "plantID") %>%
+  left_join(., df_fruit, by = "plantID") %>%
+  left_join(., df_gasex, by = "plantID")
+df_meas
+openxlsx::write.xlsx(df_meas, "../Output/Data/df_measurements.xlsx")
+
+rm(list = "df_dualex_wide", "df_lc_wide") #  remove uneccesary helper-df's
+rm(list = "df_biomass",
+   "df_il",
+   "df_dualex",
+   "df_dw_harvest",
+   "df_dw_leaves",
+   "df_dw_roots",
+   "df_fruit",
+   "df_fw_harvest",
+   "df_gasex",
+   "df_lc")
+```
+
+# 4. PCA
+
+## 4.1 set color scheme for plots
+
+```{r}
+group.colors <- c("T12/T12" = "#018571", "T12/T48" = "#80cdc1", "T48/T12" ="#dfc27d", "T48/T48" = "#a6611a")
+```
+
+## 4.2 dualex time series
+
+```{r}
+df_pca_meas_dlx <- df_meas %>%
+  dplyr::select(plantID, graft, treatment,
+         contains(c("anth", "chl", "flav", "hue_")))
+
+data.dlx.active <- df_pca_meas_dlx[1:nrow(df_pca_meas_dlx),
+                               4:ncol(df_pca_meas_dlx)]
+data.dlx.supplemental <- df_meas[1:nrow(df_pca_meas_dlx),
+                                 1:3]
+res.pca.dlx.pre <- PCA(data.dlx.active, 
+                   scale.unit = T, 
+                   graph = F, 
+                   axes = c(1,2))
+
+dlx.pca <- data.frame(res.pca.dlx.pre$var$coord)
+dlx.pca$item <- factor(rownames(dlx.pca), levels = unique(rownames(dlx.pca)))
+dlx.pca <- dlx.pca %>%
+  mutate( group = case_when(grepl("anth", item) ~ "anth",
+                            grepl("chl", item) ~"chl",
+                            grepl("flav", item) ~"flav",
+                            grepl("hue", item) ~"hue")) %>%
+  mutate ( week = stringr::str_extract(item, stringr::regex("(\\d+)(?!.*\\d)")))
+
+plot_pca_dlx <- ggplot(dlx.pca, (aes(x=Dim.1, y=Dim.2, color=group, label=week))) +
+  geom_point() +
+  geom_text_repel() +
+  theme_minimal() +
+  geom_hline(yintercept = 0, lty = 2) +
+  geom_vline(xintercept = 0, lty = 2) +
+  labs(title = "",
+       x = paste("PC1 ", "(", round(res.pca.dlx.pre$eig[1, 2], 2), "%", ")", sep=""),
+       y = paste("PC2 ", "(", round(res.pca.dlx.pre$eig[2, 2], 2), "%", ")", sep="")) +
+  scale_x_continuous(expand = expansion(mult = 0.2)) +
+  scale_y_continuous(expand = expansion(mult = 0.2))
+plot_pca_dlx
+ggsave("timeseries_dlx_1.png", path = "../Output/Plots/", device = "png", width = 170, height = 100, units=c("mm"), dpi = 300)
+
+plot_pca_dlx2 <- ggplot(dlx.pca, (aes(x=Dim.1, y=Dim.3, color=group, label=week))) +
+  geom_point() +
+  geom_text_repel() +
+  theme_minimal() +
+  geom_hline(yintercept = 0, lty = 2) +
+  geom_vline(xintercept = 0, lty = 2) +
+  labs(title = "",
+       x = paste("PC1 ", "(", round(res.pca.dlx.pre$eig[1, 2], 2), "%", ")", sep=""),
+       y = paste("PC3 ", "(", round(res.pca.dlx.pre$eig[3, 2], 2), "%", ")", sep="")) +
+  scale_x_continuous(expand = expansion(mult = 0.2)) +
+  scale_y_continuous(expand = expansion(mult = 0.2))
+plot_pca_dlx2
+ggsave("timeseries_dlx_2.png", path = "../Output/Plots/", device = "png", width = 170, height = 100, units=c("mm"), dpi = 300)
+
+plot_corrplot_pca <- ggcorrplot(res.pca.dlx.pre$var$cos2, method = "square") + 
+  coord_flip() +
+  theme(legend.title = element_text(size=8),
+        legend.key.size = unit(0.25, 'cm'), 
+        axis.text.y = element_text(size = 8),
+        axis.text.x = element_text(size = 8)) +
+  scale_fill_gradient2(low = "#f5f5f5", high = "#018571", breaks=c(0, 1), limit=c(0, 1))
+ggsave("corrplot_dlx.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+
+plot_grid(plot_corrplot_pca, plot_pca_dlx, ncol = 2, rel_widths = c(1, 2))
+ggsave("dlx_grid.png", path = "../Output/Plots/", device = "png", width = 150.0, height = 116.20, units=c("mm"), dpi = 300)
+
+rm(list = "dlx.pca",
+   "data.dlx.active",
+   "data.dlx.supplemental",
+   "res.pca.dlx.pre",
+   "df_pca_meas_dlx",
+   "plot_pca_dlx",
+   "plot_pca_dlx2",
+   "plot_corrplot_pca")
+```
+
+## 4.3 all factors
+
+```{r}
+df_pca_meas <- df_meas %>%
+  dplyr::select(-contains(c("anth", "chl", "flav", "hue_")))
+df_pca_meas <- data.frame(df_pca_meas, "anth" = df_meas$anth_wk_23,
+                          "chl" = df_meas$chl_wk_23,
+                          "flav" = df_meas$flav_wk_23,
+                          "hue" = df_meas$hue_wk_23)
+
+data.meas.active <- df_pca_meas[1:nrow(df_pca_meas), 4:ncol(df_pca_meas)]
+data.meas.supplemental <- df_pca_meas[1:nrow(df_pca_meas),1:3]
+res.pca.pre <- PCA(data.meas.active, scale.unit = T, graph = F, axes = c(1,2))
+
+meas.pca <- data.frame(res.pca.pre$var$coord)
+meas.pca$item <- factor(rownames(meas.pca), levels = unique(rownames(meas.pca)))
+
+count_tmp <- data.frame(res.pca.pre[["eig"]]) %>%
+  mutate(row = rownames(.)) %>%
+  nrow()
+
+count <- sprintf("PC %d", seq(1:count_tmp)) #manually create list of labels from n of rows in df
+
+data.frame(res.pca.pre[["eig"]]) %>%
+  ggplot(aes(x = factor(count, levels=unique(as.character(count))), y = percentage.of.variance, group = 1)) + 
+  geom_col(fill = "#018571") +
+  geom_line() +
+  geom_point() +
+  labs(y = "Erklärte Varianz [%]",
+       x = "PC") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+ggsave("pca_all_factors_scree.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+rm(list = "count_tmp",
+   "count")
+
+plot_pca <- ggplot(meas.pca, (aes(x=Dim.1, y=Dim.3,label = item))) +
+  geom_hline(yintercept = 0, lty = 2) +
+  geom_vline(xintercept = 0, lty = 2) +
+  geom_segment(aes(x = 0, xend = Dim.1, 
+                   y = 0, yend = Dim.3),
+               linewidth = 0.75, 
+               arrow = arrow(length = unit(0.025, "npc"), type = "open"), 
+               lwd = 1) +
+  geom_label_repel(box.padding = 0.5, force = 2, max.overlaps = 25, seed = 2, size = 2) +
+  theme_minimal() +
+  geom_circle(aes(x0 = 0, y0 = 0, r = 1.0)) +
+  coord_fixed() +
+  labs(title = "",
+       x = paste("PC1 ", "(", round(res.pca.pre$eig[1, 2], 2), "%", ")", sep=""),
+       y = paste("PC3 ", "(", round(res.pca.pre$eig[3, 2], 2), "%", ")", sep=""))
+plot_pca
+ggsave("pca_all_factors.png", path = "../Output/Plots/", device = "png", width = 200, height = 200, units=c("mm"), dpi = 300)
+
+meas.pca2 <- data.frame(res.pca.pre$ind$coord)
+meas.pca2 <- meas.pca2 %>%
+  mutate(plantID = data.meas.supplemental$plantID) %>% 
+  left_join(data.meas.supplemental, by = "plantID")
+
+ggplot(meas.pca2, aes(x = Dim.1, y = Dim.2, 
+                    color = graft,
+                    shape = treatment, 
+                    label = plantID)) +
+  geom_point() +
+  geom_hline(yintercept = 0, lty = 2) +
+  geom_vline(xintercept = 0, lty = 2) +
+  scale_color_manual(values = group.colors) +
+  theme_minimal() +
+  labs(title = "",
+       x = paste("PC1 ", "(", round(res.pca.pre$eig[1, 2], 2), "%", ")", sep=""),
+       y = paste("PC2 ", "(", round(res.pca.pre$eig[2, 2], 2), "%", ")", sep=""))
+
+plot_pca_genotypes <- ggplot(meas.pca2, aes(x = Dim.1, y = Dim.3, 
+                    color = graft,
+                    shape = treatment, 
+                    label = plantID)) +
+  geom_point() +
+  geom_hline(yintercept = 0, lty = 2) +
+  geom_vline(xintercept = 0, lty = 2) +
+  scale_color_manual(values = group.colors) +
+  theme_minimal() +
+  theme(legend.text=element_text(size = 8),
+        legend.title = element_text(size=8)) +
+  labs(title = "",
+       x = paste("PC1 ", "(", round(res.pca.pre$eig[1, 2], 2), "%", ")", sep=""),
+       y = paste("PC3 ", "(", round(res.pca.pre$eig[3, 2], 2), "%", ")", sep=""))
+plot_pca_genotypes
+  ggsave("pca_all_factors_genotypes.png", path = "../Output/Plots/", device = "png", width = 170, height = 100, units=c("mm"), dpi = 300)
+
+res.pca.pre$var$cos2 <- data.frame(res.pca.pre$var$cos2) %>%  
+  rename_with(~paste0("PC ", seq_along(.), sub("Dim.*", "", .)), 
+                   starts_with('Dim'))
+
+plot_pca_corrplot <- ggcorrplot(res.pca.pre$var$cos2, method = "square") + 
+  coord_flip() + 
+  theme(legend.title = element_text(size=8),
+        legend.key.size = unit(0.25, 'cm'), 
+        axis.text.y = element_text(size = 8),
+        axis.text.x = element_text(size = 8)) +
+  scale_fill_gradient2(low = "#f5f5f5", high = "#018571", breaks=c(0, 1), limit=c(0, 1))
+
+plot_pca_corrplot
+ggsave("corrplot_all_factors.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+
+top_row <- plot_grid(plot_pca_corrplot, plot_pca, ncol = 2, labels = c('A', 'B'), label_size = 12, rel_widths = c(1, 1.5))
+bottom_row <- plot_grid(plot_pca_genotypes, ncol = 1, labels = 'C', label_size = 12)
+plot_grid(top_row, bottom_row, nrow = 2, rel_heights = c(1.3, 1))
+ggsave("corrplot_grid.png", path = "../Output/Plots/", device = "png", width = 150.0, height = 230, units=c("mm"), dpi = 300)
+
+rm(list = "meas.pca",
+   "meas.pca2",
+   "data.meas.active",
+   "data.meas.supplemental",
+   "res.pca.pre",
+   "top_row",
+   "bottom_row")
+
+rm(list = ls(pattern = "^plot"))
+```
+
+# 5. Visualisiation
+
+## 5.1 chlorophyll
+
+```{r warning=FALSE}
+df_chl <- df_meas %>%
+  dplyr::select(plantID, graft, treatment, "chl" = chl_wk_23)
+p <- leveneTest(chl ~ graft*treatment, data=df_chl, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_chl_sup_qq <- ggqqplot(df_chl$chl)
+plot_chl_sup_qq
+ggsave("supp_qq_chlorophyll.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_chl_sup_qq_facet <- ggqqplot(df_chl, "chl", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+plot_chl_sup_qq_facet
+ggsave("supp_qq_chlorophyll1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_chl_sup_qq, plot_chl_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_chlorophyll.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(chl ~ graft * treatment + (graft*treatment), data = df_chl)
+p <- summary(anova)
+p
+## p-value < 0,05.H0 of different means is not accepted. 
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+
+df_plot_chl <- df_chl %>%
+  group_by(treatment, graft) %>%
+  summarise(mean = mean(chl),
+            sd = sd(chl),
+            se = sd(chl) / sqrt(n()),
+            max = mean+se,
+            min = mean-se,
+            .groups = "drop")
+df_plot_chl
+
+plot_chl <- df_plot_chl %>%
+  # basic barplot
+  ggplot(aes(fill=graft, y=mean, x=treatment)) + 
+  geom_bar(position="dodge", 
+           stat="identity") +
+  # setting y-scale name, limits, breaks and sequencing
+  scale_y_continuous(name="Chlorophyll-Gehalt [/]", 
+                     limits = c(0, 30), 
+                     breaks = seq(0, 30, by = 5)) +
+  # adding errorbar and ns. label
+  geom_errorbar(aes(ymin=min-se, ymax=max+se), 
+                position=position_dodge(.9), 
+                width=0.3) +
+  
+  geom_signif(comparisons = list(c("ctrl", "heat")), 
+              annotation = c("***"), # manually adding "***" because geom_signif calculates only one "*"
+              map_signif_level=TRUE,
+              y_position = c(25)) +
+  # adding color and changing to more minimal theme
+  theme_classic() +
+  scale_fill_manual(values = group.colors,
+                    name = "Veredelung (U/E)") +
+  scale_x_discrete(labels= c("Kontrolle","Hitzestress")) +
+  xlab("Behandlung") +
+  theme(text = element_text(size = 8),
+        axis.text = element_text(size = 8),
+        legend.title = element_text(size=8),
+        legend.text = element_text(size=5))
+plot_chl
+ggsave("barplot_chlorophyll.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.25, units=c("mm"), dpi = 300)
+```
+
+## 5.2 anthocyanins
+
+```{r}
+df_anth <- df_meas %>%
+  dplyr::select(plantID, graft, treatment, "anth" = anth_wk_23)
+p <- leveneTest(anth ~ graft*treatment, data=df_anth, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_anth_sup_qq <- ggqqplot(df_anth$anth)
+plot_anth_sup_qq
+ggsave("supp_qq_anthocyanins.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_anth_sup_qq_facet <- ggqqplot(df_anth, "anth", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+plot_anth_sup_qq_facet
+ggsave("supp_qq_anthocyanins1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_anth_sup_qq, plot_anth_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_anthocyanins.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(anth ~ graft * treatment + (graft*treatment), data = df_anth)
+p <- summary(anova)
+p
+## p-value < 0,05.H0 of different means is not accepted. 
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+TUK = TukeyHSD(anova, ordered = T)
+
+# remove redundant helper-df
+rm(anova)
+
+# Convert the TukeyHSD output to a standard data frame
+TUK = as.data.frame(TUK$`graft:treatment`)
+names(TUK) = gsub(" ", ".", names(TUK))
+
+HSD = data.frame(Comparison=row.names(TUK), 
+                 diff=TUK$diff, lwr=TUK$lwr, lwr=TUK$lwr, p.adj=TUK$p.adj)
+
+# remove redundant helper-df
+rm(TUK)
+
+HSD <- HSD %>%
+  mutate_at(vars(Comparison), ~ str_replace_all(., ":", "#"))
+
+cld <- cldList(p.adj ~ Comparison, data = HSD,
+               threshold = 0.05,
+               remove.space=FALSE)
+# remove redundant helper-df
+rm(HSD)
+
+cld <- cld %>% 
+  extract(Group, c("graft", "treatment"), "(.*(?=#)).*((?<=#).*)")
+
+df_plot_anth <- df_anth %>%
+  group_by(treatment, graft) %>%
+  summarise(mean = mean(anth),
+            sd = sd(anth),
+            se = sd(anth) / sqrt(n()),
+            max = mean+se,
+            min = mean-se,
+            .groups = "drop")
+
+df_plot_anth <- cld %>%
+  dplyr::select(graft, treatment, Letter) %>%
+  right_join(df_plot_anth, 
+             by = c("graft" = "graft", "treatment" = "treatment"))
+rm (cld)
+
+plot_anth <- df_plot_anth %>%
+  # basic barplot
+  ggplot(aes(fill=graft, y=mean, x=treatment)) + 
+  geom_bar(position="dodge", 
+           stat="identity") +
+  # setting y-scale name, limits, breaks and sequencing
+  scale_y_continuous(name="Anthocyan-Gehalt [/]") +
+  scale_fill_manual(values = group.colors,
+                    name = "Veredelung (U/E)") +
+  scale_x_discrete(labels= c("Kontrolle","Hitzestress")) +
+  xlab("Behandlung") +
+  # adding errorbar and ns. label
+  geom_errorbar(aes(ymin=min-sd, ymax=max+sd), 
+                position=position_dodge(.9), 
+                width=0.3) +
+   
+  geom_text(aes(label = str_trim(Letter), 
+                y = mean + sd), 
+            vjust = -1.5, 
+            position=position_dodge(.9)) +
+  # adding color and changing to more minimal theme
+  theme_classic() +
+  coord_cartesian(clip = "off") +
+  theme(text = element_text(size = 8),
+        axis.text = element_text(size = 8),
+        legend.title = element_text(size=8),
+        legend.text = element_text(size=5))
+plot_anth
+ggsave("barplot_anthocyanins.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+```
+
+## 5.3 flavonoids
+
+```{r}
+df_flav <- df_meas %>%
+  dplyr::select(plantID, graft, treatment, "flav" = flav_wk_23)
+p <- leveneTest(flav ~ graft*treatment, data=df_flav, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_flav_sup_qq <- ggqqplot(df_flav$flav)
+plot_flav_sup_qq
+ggsave("supp_qq_flavonoids.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_flav_sup_qq_facet <- ggqqplot(df_flav, "flav", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+plot_flav_sup_qq_facet
+ggsave("supp_qq_flavonoids1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_flav_sup_qq, plot_flav_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_flavonoids.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(flav ~ graft * treatment + (graft*treatment), data = df_flav)
+p <- summary(anova)
+p
+## p-value < 0,05.H0 of different means is not accepted. 
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+
+df_plot_flav <- df_flav %>%
+  group_by(treatment, graft) %>%
+  summarise(mean = mean(flav),
+            sd = sd(flav),
+            se = sd(flav) / sqrt(n()),
+            max = mean+se,
+            min = mean-se,
+            .groups = "drop")
+
+plot_flav <- df_plot_flav %>%
+  # basic barplot
+  ggplot(aes(fill=graft, y=mean, x=treatment)) + 
+  geom_bar(position="dodge", stat="identity") +
+  # setting y-scale name, limits, breaks and sequencing
+  scale_y_continuous(name="Flavonoid-Gehalt [/]", limits = c(0, 0.8), breaks = seq(0, 0.8, by = 0.1)) +
+  scale_fill_manual(values = group.colors,
+                    name = "Veredelung (U/E)") +
+  scale_x_discrete(labels= c("Kontrolle","Hitzestress")) +
+  xlab("Behandlung") +
+  # adding errorbar and cld
+  geom_errorbar(aes(ymin=min-se, ymax=max+se), 
+                position=position_dodge(.9), 
+                width=0.3) +
+  
+  geom_signif(comparisons = list(c("ctrl", "heat")),
+              map_signif_level=TRUE,
+              y_position = c(0.5)) +
+  # adding color and changing to more minimal theme 
+  theme_classic() +
+  theme(text = element_text(size = 10),
+        axis.text = element_text(size = 10),
+        legend.title = element_text(size=8),
+        legend.text = element_text(size=5))
+plot_flav
+ggsave("barplot_flavonoids.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+```
+
+## 5.4 leaf color
+
+```{r}
+df_hue <- df_meas %>%
+  dplyr::select(plantID, graft, treatment, "hue" = hue_wk_23)
+p <- leveneTest(hue ~ graft*treatment, data=df_hue, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_hue_sup_qq <- ggqqplot(df_hue$hue)
+plot_hue_sup_qq
+ggsave("supp_qq_leafhue.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_hue_sup_qq_facet <- ggqqplot(df_hue, "hue", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+plot_hue_sup_qq_facet
+ggsave("supp_qq_leafhue1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_hue_sup_qq, plot_hue_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_hue.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(hue ~ graft * treatment + (graft*treatment), data = df_hue)
+p <- summary(anova)
+p
+## p-value < 0,05.H0 of different means is not accepted. 
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+TUK = TukeyHSD(anova, ordered = T)
+
+# remove redundant helper-df
+rm(anova)
+
+# Convert the TukeyHSD output to a standard data frame
+TUK = as.data.frame(TUK$`graft:treatment`)
+names(TUK) = gsub(" ", ".", names(TUK))
+
+HSD = data.frame(Comparison=row.names(TUK), 
+                 diff=TUK$diff, lwr=TUK$lwr, lwr=TUK$lwr, p.adj=TUK$p.adj)
+
+# remove redundant helper-df
+rm(TUK)
+
+HSD <- HSD %>%
+  mutate_at(vars(Comparison), ~ str_replace_all(., ":", "#"))
+
+cld <- cldList(p.adj ~ Comparison, data = HSD,
+               threshold = 0.05,
+               remove.space=FALSE)
+# remove redundant helper-df
+rm(HSD)
+
+cld <- cld %>% 
+  extract(Group, c("graft", "treatment"), "(.*(?=#)).*((?<=#).*)")
+
+df_plot_hue <- df_hue %>%
+  group_by(treatment, graft) %>%
+  summarise(mean = mean(hue),
+            sd = sd(hue),
+            se = sd(hue) / sqrt(n()),
+            max = mean+se,
+            min = mean-se,
+            .groups = "drop")
+
+df_plot_hue <- cld %>%
+  dplyr::select(graft, treatment, Letter) %>%
+  right_join(df_plot_hue, 
+             by = c("graft" = "graft", "treatment" = "treatment"))
+
+rm (cld)
+
+plot_hue <- df_plot_hue %>%
+  # basic barplot
+  ggplot(aes(fill=graft, y=mean, x=treatment)) + 
+  geom_bar(position="dodge", 
+           stat="identity") +
+  #setting y-scale name, limits, breaks and sequencing
+  scale_y_continuous(name="Blattfarbe [°]",
+                     limits = c(0, 150),
+                     breaks = seq(0, 150, by = 20)) +
+  scale_fill_manual(values = group.colors,
+                    name = "Veredelung (U/E)") +
+  scale_x_discrete(labels= c("Kontrolle","Hitzestress")) +
+  xlab("Behandlung") +
+  #adding errorbar and ns. label
+  geom_errorbar(aes(ymin=min-sd, ymax=max+sd), 
+                position=position_dodge(.9), 
+                width=0.3) +
+   
+  geom_text(aes(label = str_trim(Letter), 
+                y = mean + sd), 
+            vjust = -1.5, 
+            position=position_dodge(.9)) +
+  # adding color and changing to more minimal theme
+  theme_classic() +
+  theme(text = element_text(size = 8),
+        axis.text = element_text(size = 8),
+        legend.title = element_text(size=8),
+        legend.text = element_text(size=5))
+plot_hue
+ggsave("barplot_leafhue.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+
+legend <- get_legend(
+  # create some space to the left of the legend
+  plot_chl + guides(color = guide_legend(nrow = 1)) +
+    theme(legend.position = "bottom")
+)
+
+pgrid <- plot_grid(plot_chl + theme(legend.position="none"),
+          plot_hue + theme(legend.position="none"), 
+          plot_anth + theme(legend.position="none"), 
+          plot_flav + theme(legend.position="none"), 
+          align='v', 
+          labels=c('A', 'B','C','D'))
+
+plot_grid(pgrid, legend, ncol = 1, rel_heights = c(1, .1))
+ggsave("barplot_all.png", path = "../Output/Plots/", device = "png", width = 150.0, height = 150, units=c("mm"), dpi = 300)
+rm(legend)
+rm(pgrid)
+
+rm(list = ls(pattern = "^plot"))
+```
+
+## 5.5 fruit yield data
+
+load iPASTIC-Toolkit
+
+```{r include=FALSE}
+source(file="../Scripts/Functions/iPASTIC.R")
+```
+
+```{r}
+df_yield <- df_meas %>%
+  dplyr::select(graft, treatment, "yield" = fruit_weight) %>%
+  group_by(graft) %>%
+  summarise(Yp = sum(yield[treatment == "ctrl"], na.rm=TRUE), #NA remove call: might remove globally in beginning?
+            Ys = sum(yield[treatment == "heat"], na.rm=TRUE)) %>%
+  rename("Genotype Code" = graft)
+df_indices <- Calculate(df_yield)$`indices`
+df_indices <- dplyr::select(df_indices, Yp, Ys, MP, GMP, SSI)
+df_indices
+openxlsx::write.xlsx(df_indices, "../Output/Data/df_stress_indices.xlsx")
+
+## fruitcount
+p <- leveneTest(fruit_count ~ graft*treatment, data=df_meas, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_fruitcount_sup_qq <- ggqqplot(df_meas$fruit_count)
+plot_fruitcount_sup_qq
+ggsave("supp_qq_fruitcount.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_fruitcount_sup_qq_facet <- ggqqplot(df_meas, "fruit_count", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+plot_fruitcount_sup_qq_facet
+ggsave("supp_qq_fruitcount1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_fruitcount_sup_qq, plot_fruitcount_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_fruitcount.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+
+anova = aov(fruit_count ~ graft * treatment + (graft*treatment), data = df_meas)
+p <- summary(anova)
+p
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+TUK = TukeyHSD(anova, ordered = T)
+
+# remove redundant helper-df
+rm(anova)
+
+# Convert the TukeyHSD output to a standard data frame
+TUK = as.data.frame(TUK$`graft:treatment`)
+names(TUK) = gsub(" ", ".", names(TUK))
+
+HSD = data.frame(Comparison=row.names(TUK), 
+                 diff=TUK$diff, lwr=TUK$lwr, lwr=TUK$lwr, p.adj=TUK$p.adj)
+
+# remove redundant helper-df
+rm(TUK)
+
+HSD <- HSD %>%
+  mutate_at(vars(Comparison), ~ str_replace_all(., ":", "#"))
+
+cld <- cldList(p.adj ~ Comparison, data = HSD,
+               threshold = 0.05,
+               remove.space=FALSE)
+# remove redundant helper-df
+rm(HSD)
+
+cld_fruitcount <- cld %>% 
+  extract(Group, c("graft", "treatment"), "(.*(?=#)).*((?<=#).*)")
+rm (cld)
+
+df_fruitcount <- df_meas %>%
+  group_by(treatment, graft) %>%
+  summarise(sum_fruit_count = sum(fruit_count, na.rm = TRUE),
+            sd = sd(fruit_count, na.rm=TRUE),
+            .groups = "drop")
+
+df_fruitcount <- cld_fruitcount %>%
+  dplyr::select(graft, treatment, Letter) %>%
+  right_join(df_fruitcount, 
+             by = c("graft" = "graft", "treatment" = "treatment"))
+
+rm (cld_fruitcount)
+
+
+## fruit freshweight
+p <- leveneTest(fruit_weight ~ graft*treatment, data=df_meas, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_fruitweight_sup_qq <- ggqqplot(df_meas$fruit_weight)
+plot_fruitweight_sup_qq
+ggsave("supp_qq_fruitweight.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_fruitweight_sup_qq_facet <- ggqqplot(df_meas, "fruit_weight", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+plot_fruitweight_sup_qq_facet
+ggsave("supp_qq_fruitweight1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_fruitweight_sup_qq, plot_fruitweight_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_fruitweight.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(fruit_weight ~ graft * treatment + (graft*treatment), data = df_meas)
+p <- summary(anova)
+p
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+TUK = TukeyHSD(anova, ordered = T)
+
+# remove redundant helper-df
+rm(anova)
+
+# Convert the TukeyHSD output to a standard data frame
+TUK = as.data.frame(TUK$`graft:treatment`)
+names(TUK) = gsub(" ", ".", names(TUK))
+
+HSD = data.frame(Comparison=row.names(TUK), 
+                 diff=TUK$diff, lwr=TUK$lwr, lwr=TUK$lwr, p.adj=TUK$p.adj)
+
+# remove redundant helper-df
+rm(TUK)
+
+HSD <- HSD %>%
+  mutate_at(vars(Comparison), ~ str_replace_all(., ":", "#"))
+
+cld <- cldList(p.adj ~ Comparison, data = HSD,
+               threshold = 0.05,
+               remove.space=FALSE)
+# remove redundant helper-df
+rm(HSD)
+
+cld_fruitweight <- cld %>% 
+  extract(Group, c("graft", "treatment"), "(.*(?=#)).*((?<=#).*)")
+rm(cld)
+
+df_fruitweight <- df_meas %>%
+  group_by(treatment, graft) %>%
+  summarise(mean = mean(fruit_weight, na.rm = TRUE),
+            sd = sd(fruit_weight, na.rm=TRUE),
+            .groups = "drop")
+
+df_fruitweight <- cld_fruitweight %>%
+  dplyr::select(graft, treatment, Letter) %>%
+  right_join(df_fruitweight, 
+             by = c("graft" = "graft", "treatment" = "treatment"))
+
+rm (cld_fruitweight)
+
+## singlefruitweight
+df_meas <- df_meas %>%
+  mutate(singlefruitweight = mean(fruit_weight / fruit_count)) %>%
+  relocate (singlefruitweight, .after = fruit_weight)
+
+p <- leveneTest(singlefruitweight ~ graft*treatment, data=df_meas, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_singlefruitweight_sup_qq <- ggqqplot(df_meas$singlefruitweight)
+plot_singlefruitweight_sup_qq
+ggsave("supp_qq_singlefruitweight.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_singlefruitweight_sup_qq_facet <- ggqqplot(df_meas, "singlefruitweight", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+plot_singlefruitweight_sup_qq_facet
+ggsave("supp_qq_singlefruitweight1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_singlefruitweight_sup_qq, plot_singlefruitweight_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_singlefruitweight.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(singlefruitweight ~ graft * treatment + (graft*treatment), data = df_meas)
+p <- summary(anova)
+p
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+TUK = TukeyHSD(anova, ordered = T)
+
+# remove redundant helper-df
+rm(anova)
+
+# Convert the TukeyHSD output to a standard data frame
+TUK = as.data.frame(TUK$`graft:treatment`)
+names(TUK) = gsub(" ", ".", names(TUK))
+
+HSD = data.frame(Comparison=row.names(TUK), 
+                 diff=TUK$diff, lwr=TUK$lwr, lwr=TUK$lwr, p.adj=TUK$p.adj)
+
+# remove redundant helper-df
+rm(TUK)
+
+HSD <- HSD %>%
+  mutate_at(vars(Comparison), ~ str_replace_all(., ":", "#"))
+
+cld <- cldList(p.adj ~ Comparison, data = HSD,
+               threshold = 0.05,
+               remove.space=FALSE)
+# remove redundant helper-df
+rm(HSD)
+
+cld_singlefruitweight <- cld %>% 
+  extract(Group, c("graft", "treatment"), "(.*(?=#)).*((?<=#).*)")
+rm(cld)
+
+df_singlefruitweight <- df_meas %>%
+  group_by(treatment, graft) %>%
+  summarise(mean_singlefruitweight = mean(singlefruitweight, na.rm = TRUE),
+            sd = sd(singlefruitweight, na.rm=TRUE),
+            .groups = "drop")
+
+df_singlefruitweight <- cld_singlefruitweight %>%
+  dplyr::select(graft, treatment, Letter) %>%
+  right_join(df_singlefruitweight, 
+             by = c("graft" = "graft", "treatment" = "treatment"))
+
+rm (cld_singlefruitweight)
+
+## fruit dryweight
+p <- leveneTest(fruit_dw_pct ~ graft*treatment, data=df_meas, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_fruit_dw_sup_qq <- ggqqplot(df_meas$fruit_dw_pct)
+plot_fruit_dw_sup_qq
+ggsave("supp_qq_fruit_dw.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_fruit_dw_sup_qq_facet <- ggqqplot(df_meas, "fruit_dw_pct", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+plot_fruit_dw_sup_qq_facet
+ggsave("supp_qq_fruit_dw1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_fruit_dw_sup_qq, plot_fruit_dw_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_fruit_dw.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(fruit_dw_pct ~ graft * treatment + (graft*treatment), data = df_meas)
+p <- summary(anova)
+p
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+TUK = TukeyHSD(anova, ordered = T)
+
+# remove redundant helper-df
+rm(anova)
+
+# Convert the TukeyHSD output to a standard data frame
+TUK = as.data.frame(TUK$`graft:treatment`)
+names(TUK) = gsub(" ", ".", names(TUK))
+
+HSD = data.frame(Comparison=row.names(TUK), 
+                 diff=TUK$diff, lwr=TUK$lwr, lwr=TUK$lwr, p.adj=TUK$p.adj)
+
+# remove redundant helper-df
+rm(TUK)
+
+HSD <- HSD %>%
+  mutate_at(vars(Comparison), ~ str_replace_all(., ":", "#"))
+
+cld <- cldList(p.adj ~ Comparison, data = HSD,
+               threshold = 0.05,
+               remove.space=FALSE)
+# remove redundant helper-df
+rm(HSD)
+
+cld_fruit_dw <- cld %>% 
+  extract(Group, c("graft", "treatment"), "(.*(?=#)).*((?<=#).*)")
+rm(cld)
+
+df_fruit_dw <- df_meas %>%
+  group_by(treatment, graft) %>%
+  summarise(mean = mean(fruit_dw_pct, na.rm = TRUE),
+            sd = sd(fruit_dw_pct, na.rm=TRUE),
+            .groups = "drop")
+
+df_fruit_dw <- cld_fruit_dw %>%
+  dplyr::select(graft, treatment, Letter) %>%
+  right_join(df_fruit_dw, 
+             by = c("graft" = "graft", "treatment" = "treatment"))
+
+rm (cld_fruit_dw)
+
+df_fruityield <- df_meas %>%
+  dplyr::select(graft, treatment, "count" = fruit_count, "weight" = fruit_weight, "dw" = fruit_dw_pct, singlefruitweight) %>%
+  group_by(graft, treatment) %>%
+  summarise(fruitcount = sum(count, na.rm=TRUE),
+            fruitweight = mean(weight, na.rm = TRUE),
+            singlefruitweight = mean(singlefruitweight, na.rm=TRUE),
+            dw = mean(dw, na.rm=TRUE)) 
+
+df_fruityield <- merge(x = df_fruityield, y = df_fruitcount[ , c("graft", "treatment", "Letter", "sd")], by = c("graft","treatment"), all.x=TRUE)
+df_fruityield <- df_fruityield %>% 
+  rename("cld_fc" = Letter, "sd_fc" = sd) %>%
+  relocate(cld_fc, .after = fruitcount) %>%
+  relocate(sd_fc, .after = fruitcount)
+df_fruityield <-merge(x = df_fruityield, y = df_fruitweight[ , c("graft", "treatment", "Letter", "sd")], by = c("graft","treatment"), all.x=TRUE)
+df_fruityield <- df_fruityield %>% 
+  rename("cld_fw" = Letter, "sd_fw" = sd) %>%
+  relocate(cld_fw, .after = fruitweight) %>%
+  relocate(sd_fw, .after = fruitweight)
+df_fruityield <-merge(x = df_fruityield, y = df_singlefruitweight[ , c("graft", "treatment", "Letter", "sd")], by = c("graft","treatment"), all.x=TRUE)
+df_fruityield <- df_fruityield %>% 
+  rename("cld_sfw" = Letter, "sd_sfw" = sd) %>%
+  relocate(cld_sfw, .after = singlefruitweight) %>%
+  relocate(sd_sfw, .after = singlefruitweight)
+df_fruityield <-merge(x = df_fruityield, y = df_fruit_dw[ , c("graft", "treatment", "Letter", "sd")], by = c("graft","treatment"), all.x=TRUE)
+df_fruityield <- df_fruityield %>% 
+  rename("cld_dw" = Letter, "sd_dw" = sd) %>%
+  relocate(cld_dw, .after = dw) %>%
+  relocate(sd_dw, .after = dw)
+
+rm(list = "df_fruit_dw", 
+   "df_fruitcount", 
+   "df_fruitweight") #  remove unecessary helper variables
+
+openxlsx::write.xlsx(df_fruityield, "../Output/Data/df_fruityield.xlsx")
+
+
+## fruit brix
+p <- leveneTest(fruit_brix ~ graft*treatment, data=df_meas, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_fruit_brix_sup_qq <- ggqqplot(df_meas$fruit_brix)
+plot_fruit_brix_sup_qq
+ggsave("supp_qq_fruit_brix.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_fruit_brix_sup_qq_facet <- ggqqplot(df_meas, "fruit_brix", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+plot_fruit_brix_sup_qq_facet
+ggsave("supp_qq_fruit_brix1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_fruit_brix_sup_qq, plot_fruit_brix_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_fruit_brix.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(fruit_brix ~ graft * treatment + (graft*treatment), data = df_meas)
+p <- summary(anova)
+p
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+TUK = TukeyHSD(anova, ordered = T)
+
+# remove redundant helper-df
+rm(anova)
+
+# Convert the TukeyHSD output to a standard data frame
+TUK = as.data.frame(TUK$`graft:treatment`)
+names(TUK) = gsub(" ", ".", names(TUK))
+
+HSD = data.frame(Comparison=row.names(TUK), 
+                 diff=TUK$diff, lwr=TUK$lwr, lwr=TUK$lwr, p.adj=TUK$p.adj)
+
+# remove redundant helper-df
+rm(TUK)
+
+HSD <- HSD %>%
+  mutate_at(vars(Comparison), ~ str_replace_all(., ":", "#"))
+
+cld <- cldList(p.adj ~ Comparison, data = HSD,
+               threshold = 0.05,
+               remove.space=FALSE)
+# remove redundant helper-df
+rm(HSD)
+
+cld_brix <- cld %>% 
+  extract(Group, c("graft", "treatment"), "(.*(?=#)).*((?<=#).*)")
+rm(cld)
+
+df_brix <- df_meas %>%
+  group_by(treatment, graft) %>%
+  summarise(mean = mean(fruit_brix, na.rm = TRUE),
+            .groups = "drop")
+
+df_brix <- cld_brix %>%
+  dplyr::select(graft, treatment, Letter) %>%
+  right_join(df_brix, 
+             by = c("graft" = "graft", "treatment" = "treatment"))
+
+rm (cld_brix)
+
+## fruit pH
+p <- leveneTest(fruit_pH ~ graft*treatment, data=df_meas, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_fruit_pH_sup_qq <- ggqqplot(df_meas$fruit_pH)
+plot_fruit_pH_sup_qq
+ggsave("supp_qq_fruit_pH.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_fruit_pH_sup_qq_facet <- ggqqplot(df_meas, "fruit_pH", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+plot_fruit_pH_sup_qq_facet
+ggsave("supp_qq_fruit_pH1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_fruit_pH_sup_qq, plot_fruit_pH_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_fruit_pH.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(fruit_pH ~ graft * treatment + (graft*treatment), data = df_meas)
+p <- summary(anova)
+p
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+TUK = TukeyHSD(anova, ordered = T)
+
+# remove redundant helper-df
+rm(anova)
+
+# Convert the TukeyHSD output to a standard data frame
+TUK = as.data.frame(TUK$`graft:treatment`)
+names(TUK) = gsub(" ", ".", names(TUK))
+
+HSD = data.frame(Comparison=row.names(TUK), 
+                 diff=TUK$diff, lwr=TUK$lwr, lwr=TUK$lwr, p.adj=TUK$p.adj)
+
+# remove redundant helper-df
+rm(TUK)
+
+HSD <- HSD %>%
+  mutate_at(vars(Comparison), ~ str_replace_all(., ":", "#"))
+
+cld <- cldList(p.adj ~ Comparison, data = HSD,
+               threshold = 0.05,
+               remove.space=FALSE)
+# remove redundant helper-df
+rm(HSD)
+
+cld_pH <- cld %>% 
+  extract(Group, c("graft", "treatment"), "(.*(?=#)).*((?<=#).*)")
+rm(cld)
+
+df_pH <- df_meas %>%
+  group_by(treatment, graft) %>%
+  summarise(mean = mean(fruit_pH, na.rm = TRUE),
+            .groups = "drop")
+
+df_pH <- cld_pH %>%
+  dplyr::select(graft, treatment, Letter) %>%
+  right_join(df_pH, 
+             by = c("graft" = "graft", "treatment" = "treatment"))
+
+rm (cld_pH)
+
+## fruit hue/colour
+p <- leveneTest(fruit_hue ~ graft*treatment, data=df_meas, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_fruit_hue_sup_qq <- ggqqplot(df_meas$fruit_hue)
+plot_fruit_hue_sup_qq
+ggsave("supp_qq_fruit_hue.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_fruit_hue_sup_qq_facet <- ggqqplot(df_meas, "fruit_hue", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+plot_fruit_hue_sup_qq_facet
+ggsave("supp_qq_fruit_hue1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_fruit_hue_sup_qq, plot_fruit_hue_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_fruit_hue.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(fruit_hue ~ graft * treatment + (graft*treatment), data = df_meas)
+p <- summary(anova)
+p
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+TUK = TukeyHSD(anova, ordered = T)
+
+# remove redundant helper-df
+rm(anova)
+
+# Convert the TukeyHSD output to a standard data frame
+TUK = as.data.frame(TUK$`graft:treatment`)
+names(TUK) = gsub(" ", ".", names(TUK))
+
+HSD = data.frame(Comparison=row.names(TUK), 
+                 diff=TUK$diff, lwr=TUK$lwr, lwr=TUK$lwr, p.adj=TUK$p.adj)
+
+# remove redundant helper-df
+rm(TUK)
+
+HSD <- HSD %>%
+  mutate_at(vars(Comparison), ~ str_replace_all(., ":", "#"))
+
+cld <- cldList(p.adj ~ Comparison, data = HSD,
+               threshold = 0.05,
+               remove.space=FALSE)
+# remove redundant helper-df
+rm(HSD)
+
+cld_fruit_hue <- cld %>% 
+  extract(Group, c("graft", "treatment"), "(.*(?=#)).*((?<=#).*)")
+rm(cld)
+
+df_fruit_hue <- df_meas %>%
+  group_by(treatment, graft) %>%
+  summarise(mean = mean(fruit_hue, na.rm = TRUE),
+            .groups = "drop")
+
+df_fruit_hue <- cld_fruit_hue %>%
+  dplyr::select(graft, treatment, Letter) %>%
+  right_join(df_fruit_hue, 
+             by = c("graft" = "graft", "treatment" = "treatment"))
+
+rm (cld_fruit_hue)
+
+df_fruitquality <- df_meas %>%
+  dplyr::select(graft, treatment, "brix" = fruit_brix, "pH" = fruit_pH, "hue" = fruit_hue, "dw" = fruit_dw_pct) %>%
+  group_by(graft, treatment) %>%
+  summarise(brix = mean(brix, na.rm=TRUE),
+            pH = mean(pH, na.rm=TRUE),
+            hue = mean(hue, na.rm=TRUE))
+
+df_fruitquality <- merge(x = df_fruitquality, y = df_brix[ , c("graft", "treatment", "Letter")], by = c("graft","treatment"), all.x=TRUE)
+df_fruitquality <- df_fruitquality %>% 
+  rename("cld_brix" = Letter) %>%
+  relocate(cld_brix, .after = brix)
+df_fruitquality <-merge(x = df_fruitquality, y = df_pH[ , c("graft", "treatment", "Letter")], by = c("graft","treatment"), all.x=TRUE)
+df_fruitquality <- df_fruitquality %>% 
+  rename("cld_pH" = Letter) %>%
+  relocate(cld_pH, .after = pH)
+df_fruitquality <-merge(x = df_fruitquality, y = df_fruit_hue[ , c("graft", "treatment", "Letter")], by = c("graft","treatment"), all.x=TRUE)
+df_fruitquality <- df_fruitquality %>% 
+  rename("cld_fruit_hue" = Letter) %>%
+  relocate(cld_fruit_hue, .after = hue)
+
+rm(list = "df_brix", 
+   "df_pH", 
+   "df_fruit_hue") #  remove unecessary helper variables
+
+openxlsx::write.xlsx(df_fruitquality, "../Output/Data/df_fruit_quality.xlsx")
+
+rm(list = ls(pattern = "^plot"))
+```
+
+## 5.6 biomass
+
+```{r}
+df_biomass <- df_meas %>%
+  dplyr::select(plantID, graft, treatment, biomass, dw_pct, dw_roots) %>%
+  group_by(treatment, graft)
+
+## biomass/freshweight of shoots and leaves
+p <- leveneTest(biomass ~ graft*treatment, data=df_biomass, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_biomass_sup_qq <- ggqqplot(df_biomass$biomass)
+ggsave("supp_qq_biomass.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_biomass_sup_qq_facet <- ggqqplot(df_biomass, "biomass", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+ggsave("supp_qq_biomass1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_biomass_sup_qq, plot_biomass_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_biomass.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(biomass ~ graft * treatment + (graft*treatment), data = df_biomass)
+p <- summary(anova)
+p
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+TUK = TukeyHSD(anova, ordered = T)
+
+# remove redundant helper-df
+rm(anova)
+
+# Convert the TukeyHSD output to a standard data frame
+TUK = as.data.frame(TUK$`graft:treatment`)
+names(TUK) = gsub(" ", ".", names(TUK))
+
+HSD = data.frame(Comparison=row.names(TUK), 
+                 diff=TUK$diff, lwr=TUK$lwr, lwr=TUK$lwr, p.adj=TUK$p.adj)
+
+# remove redundant helper-df
+rm(TUK)
+
+HSD <- HSD %>%
+  mutate_at(vars(Comparison), ~ str_replace_all(., ":", "#"))
+
+cld <- cldList(p.adj ~ Comparison, data = HSD,
+               threshold = 0.05,
+               remove.space=FALSE)
+# remove redundant helper-df
+rm(HSD)
+
+cld <- cld %>% 
+  extract(Group, c("graft", "treatment"), "(.*(?=#)).*((?<=#).*)")
+
+df_plot_biomass <- df_biomass %>%
+  dplyr::select(plantID, graft, treatment, biomass, dw_pct, dw_roots) %>%
+  group_by(treatment, graft) %>%
+  summarise(mean = mean(biomass),
+            sd = sd(biomass),
+            se = sd(biomass) / sqrt(n()),
+            max = mean+se,
+            min = mean-se,
+            .groups = "drop")
+
+df_plot_biomass <- cld %>%
+  dplyr::select(graft, treatment, Letter) %>%
+  right_join(df_plot_biomass, 
+             by = c("graft" = "graft", "treatment" = "treatment"))
+rm (cld)
+
+plot_biomass <- df_plot_biomass %>%
+  # basic barplot
+  ggplot(aes(fill=graft, y=mean, x=treatment)) + 
+  geom_bar(position="dodge", 
+           stat="identity") +
+  # setting y-scale name, limits, breaks and sequencing
+  scale_y_continuous(name="Mittlere Frischmasse [g]") +
+  scale_fill_manual(values = group.colors,
+                    name = "Veredelung (U/E)") +
+  scale_x_discrete(labels= c("Kontrolle","Hitzestress")) +
+  xlab("Behandlung") +
+  # adding errorbar and ns. label
+  geom_errorbar(aes(ymin=min-sd, ymax=max+sd), 
+                position=position_dodge(.9), 
+                width=0.3) +
+   
+  geom_text(aes(label = str_trim(Letter), 
+            y = mean + sd), 
+            vjust = -1.5, 
+            position=position_dodge(.9),
+            size = 3) +
+  # adding color and changing to more minimal theme
+  theme_classic() +
+  coord_cartesian(clip = "off") +
+  theme(text = element_text(size = 8),         
+        axis.text = element_text(size = 8),         
+        legend.title = element_text(size= 8),         
+        legend.text = element_text(size = 5))
+ggsave("barplot_biomass.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+
+
+## root-dryweight
+p <- leveneTest(dw_roots ~ graft*treatment, data=df_biomass, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_dw_roots_sup_qq <- ggqqplot(df_biomass$dw_roots)
+ggsave("supp_qq_dwroots.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_dw_roots_sup_qq_facet <- ggqqplot(df_biomass, "dw_roots", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+ggsave("supp_qq_dwroots1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_dw_roots_sup_qq, plot_dw_roots_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_dw_roots.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(dw_roots ~ graft * treatment + (graft*treatment), data = df_biomass)
+p <- summary(anova)
+p
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+df_plot_dw_roots <- df_biomass %>%
+  dplyr::select(plantID, graft, treatment, biomass, dw_pct, dw_roots) %>%
+  group_by(treatment, graft) %>%
+  summarise(mean = mean(dw_roots),
+            sd = sd(dw_roots),
+            se = sd(dw_roots) / sqrt(n()),
+            max = mean+se,
+            min = mean-se,
+            .groups = "drop")
+
+plot_dw_roots <- df_plot_dw_roots %>%
+  # basic barplot
+  ggplot(aes(fill=graft, y=mean, x=treatment)) + 
+  geom_bar(position="dodge", 
+           stat="identity") +
+  # setting y-scale name, limits, breaks and sequencing
+  scale_y_continuous(name="Mittlere Wurzeltrockenmasse [g]") +
+  scale_fill_manual(values = group.colors,
+                    name = "Veredelung (U/E)") +
+  scale_x_discrete(labels= c("Kontrolle","Hitzestress")) +
+  xlab("Behandlung") +
+  # adding errorbar and ns. label
+  geom_errorbar(aes(ymin=min-sd, ymax=max+sd), 
+                position=position_dodge(.9), 
+                width=0.3) +
+  geom_signif(comparisons = list(c("ctrl", "heat")),
+              annotation = c("***"), # manually adding "***" because geom_signif calculates only one "*"
+              map_signif_level=TRUE,
+              y_position = c(120),
+              size = 0.3,
+              textsize = 3) +
+  # adding color and changing to more minimal theme
+  theme_classic() +
+  coord_cartesian(clip = "off") +
+  theme(text = element_text(size = 8),         
+        axis.text = element_text(size = 8),         
+        legend.title = element_text(size = 8),         
+        legend.text = element_text(size = 5))
+ggsave("barplot_dwroots.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+
+
+## dryweight
+p <- leveneTest(dw_pct ~ graft*treatment, data=df_biomass, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_dw_sup_qq <- ggqqplot(df_biomass$dw_pct)
+ggsave("supp_qq_dw.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_dw_sup_qq_facet <- ggqqplot(df_biomass, "dw_pct", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+ggsave("supp_qq_dw1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_dw_sup_qq, plot_dw_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_dw.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(dw_pct ~ graft * treatment + (graft*treatment), data = df_biomass)
+p <- summary(anova)
+p
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+rm(anova)
+
+df_plot_dw <- df_biomass %>%
+  dplyr::select(plantID, graft, treatment, biomass, dw_pct, dw_roots) %>%
+  group_by(treatment, graft) %>%
+  summarise(mean = sum(dw_pct),
+            sd = sd(dw_pct),
+            se = sd(dw_pct) / sqrt(n()),
+            max = mean+se,
+            min = mean-se,
+            .groups = "drop")
+
+plot_dw <- df_plot_dw %>%
+  # basic barplot
+  ggplot(aes(fill=graft, y=mean, x=treatment)) + 
+  geom_bar(position="dodge", 
+           stat="identity") +
+  # setting y-scale name, limits, breaks and sequencing
+  scale_y_continuous(name="Mittlere Trockenmasse [g]") +
+  scale_fill_manual(values = group.colors,
+                    name = "Veredelung (U/E)") +
+  scale_x_discrete(labels= c("Kontrolle","Hitzestress")) +
+  xlab("Behandlung") +
+  # adding errorbar and ns. label
+  geom_errorbar(aes(ymin=min-sd, ymax=max+sd), 
+                position=position_dodge(.9), 
+                width=0.3) +
+  geom_signif(comparisons = list(c("ctrl", "heat")),
+              map_signif_level=TRUE,
+              y_position = c(300),
+              size = 0.3,
+              textsize = 3) +
+  # adding color and changing to more minimal theme
+  theme_classic() +
+  coord_cartesian(clip = "off") +
+  theme(text = element_text(size = 8),         
+        axis.text = element_text(size = 8),         
+        legend.title = element_text(size = 8),         
+        legend.text = element_text(size = 5))
+ggsave("barplot_dw.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+
+df_biomass <- df_meas %>%
+  mutate(r_s_ratio = (fruit_dw_pct / dw_pct))
+df_biomass %>%
+  dplyr::select(graft, treatment, r_s_ratio) %>%
+  group_by(graft, treatment) %>%
+  summarize(mean = mean(r_s_ratio, na.rm = TRUE))
+
+
+## root-shoot-ratio
+p <- leveneTest(r_s_ratio ~ graft*treatment, data=df_biomass, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_r_s_ratio_sup_qq <- ggqqplot(df_biomass$r_s_ratio)
+ggsave("supp_qq_r_s_ratio.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_r_s_ratio_sup_qq_facet <- ggqqplot(df_biomass, "r_s_ratio", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+ggsave("supp_qq_r_s_ratio1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_r_s_ratio_sup_qq, plot_r_s_ratio_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_r_s_ratio.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(r_s_ratio ~ graft * treatment + (graft*treatment), data = df_biomass)
+p <- summary(anova)
+p
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+TUK = TukeyHSD(anova, ordered = T)
+
+# remove redundant helper-df
+rm(anova)
+
+# Convert the TukeyHSD output to a standard data frame
+TUK = as.data.frame(TUK$`graft:treatment`)
+names(TUK) = gsub(" ", ".", names(TUK))
+
+HSD = data.frame(Comparison=row.names(TUK), 
+                 diff=TUK$diff, lwr=TUK$lwr, lwr=TUK$lwr, p.adj=TUK$p.adj)
+
+# remove redundant helper-df
+rm(TUK)
+
+HSD <- HSD %>%
+  mutate_at(vars(Comparison), ~ str_replace_all(., ":", "#"))
+
+cld <- cldList(p.adj ~ Comparison, data = HSD,
+               threshold = 0.05,
+               remove.space=FALSE)
+# remove redundant helper-df
+rm(HSD)
+
+cld <- cld %>% 
+  extract(Group, c("graft", "treatment"), "(.*(?=#)).*((?<=#).*)")
+
+df_plot_r_s_ratio <- df_biomass %>%
+  dplyr::select(plantID, graft, treatment, r_s_ratio) %>%
+  group_by(treatment, graft) %>%
+  summarise(mean = mean(r_s_ratio, na.rm = TRUE),
+            sd = sd(r_s_ratio, na.rm = TRUE),
+            se = sd(r_s_ratio, na.rm = TRUE) / sqrt(n()),
+            max = mean+se,
+            min = mean-se,
+            .groups = "drop")
+
+df_plot_r_s_ratio <- cld %>%
+  dplyr::select(graft, treatment, Letter) %>%
+  right_join(df_plot_r_s_ratio, 
+             by = c("graft" = "graft", "treatment" = "treatment"))
+rm (cld)
+
+plot_r_s_ratio <- df_plot_r_s_ratio %>%
+  # basic barplot
+  ggplot(aes(fill=graft, y=mean, x=treatment)) + 
+  geom_bar(position="dodge", 
+           stat="identity") +
+  # setting y-scale name, limits, breaks and sequencing
+  scale_y_continuous(name="Mittleres Spross-Wurzel-Verhältnis") +
+  scale_fill_manual(values = group.colors,
+                    name = "Veredelung (U/E)") +
+  scale_x_discrete(labels= c("Kontrolle","Hitzestress")) +
+  xlab("Behandlung") +
+  # adding errorbar and ns. label
+  geom_errorbar(aes(ymin=min-sd, ymax=max+sd), 
+                position=position_dodge(.9), 
+                width=0.3) +
+  geom_text(aes(label = str_trim(Letter), 
+              y = mean + sd), 
+            vjust = -1.5, 
+            position=position_dodge(.9),
+            size = 3) +
+  # adding color and changing to more minimal theme
+  theme_classic() +
+  coord_cartesian(clip = "off") +
+  theme(text = element_text(size = 8),         
+        axis.text = element_text(size = 8),         
+        legend.title = element_text(size = 8),         
+        legend.text = element_text(size = 5))
+ggsave("barplot_r_s_ratio.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+
+legend <- get_legend(
+  # create some space to the left of the legend
+  plot_dw + guides(color = guide_legend(nrow = 1)) +
+    theme(legend.position = "bottom")
+)
+
+pgrid <- plot_grid(plot_biomass + theme(legend.position="none"),
+          plot_dw + theme(legend.position="none"), 
+          plot_dw_roots + theme(legend.position="none"), 
+          plot_r_s_ratio + theme(legend.position="none"), 
+          align='v', 
+          labels=c('A', 'B','C','D'))
+
+plot_grid(pgrid, legend, ncol = 1, rel_heights = c(1, .1))
+ggsave("barplot_biomass_all.png", path = "../Output/Plots/", device = "png", width = 150.0, height = 150, units=c("mm"), dpi = 300)
+rm(legend)
+rm(pgrid)
+```
+
+## 5.7 ion leakage
+
+```{r}
+df_ion_leakage <- df_meas %>%
+  dplyr::select(plantID, graft, treatment, ion_leakage) %>%
+  group_by(treatment, graft)
+
+
+## Ion leakage
+p <- leveneTest(ion_leakage ~ graft*treatment, data=df_ion_leakage, center=mean)$`F value`[1]
+cat("LeveneTest p-value: ", p)
+if(p > 0.05) {
+  cat("H0 of different means is accepted. There is no significant difference in the means of the interaction")
+} else {
+  cat("H0 of different means is rejected There is a significant difference in the means of the interaction")
+} 
+rm(p)
+
+cat("The Shapiro-Wilk test is inaccurate for datasets > 50, graphical interpretation should be used")
+cat("QQ-Plot in ggpubr")
+plot_ion_leakage_sup_qq <- ggqqplot(df_ion_leakage$ion_leakage)
+ggsave("supp_qq_ion_leakage.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+plot_ion_leakage_sup_qq_facet <- ggqqplot(df_ion_leakage, "ion_leakage", ggtheme = theme_bw()) +
+  facet_grid(graft ~ treatment)
+ggsave("supp_qq_ion_leakage1.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+cat("all the points fall approximately along the reference line, we can assume normality")
+plot_grid(plot_ion_leakage_sup_qq, plot_ion_leakage_sup_qq_facet, labels = c('A', 'B'), label_size = 10)
+ggsave("supp_ion_leakage.png", path = "../Output/Plots/", device = "png", width = 150.5, height = 116.20, units=c("mm"), dpi = 300)
+
+anova = aov(ion_leakage ~ graft * treatment + (graft*treatment), data = df_ion_leakage)
+p <- summary(anova)
+p
+if(p[[1]][["Pr(>F)"]][1] < 0.05) {
+  cat("significance in graft")
+} else if (p[[1]][["Pr(>F)"]][1] > 0.05){
+  cat("no significance in graft")
+} 
+if(p[[1]][["Pr(>F)"]][2] < 0.05) {
+  cat("significance in treatment")
+} else if (p[[1]][["Pr(>F)"]][2] > 0.05){
+  cat("no significance in treatment")
+}
+if(p[[1]][["Pr(>F)"]][3] < 0.05) {
+  cat("significance in the interaction graft:treatment")
+} else if (p[[1]][["Pr(>F)"]][3] > 0.05){
+  cat("no significance in the interaction graft:treatment, therefore no need for cld's")
+}
+rm(p)
+
+TUK = TukeyHSD(anova, ordered = T)
+
+# remove redundant helper-df
+rm(anova)
+
+# Convert the TukeyHSD output to a standard data frame
+TUK = as.data.frame(TUK$`graft:treatment`)
+names(TUK) = gsub(" ", ".", names(TUK))
+
+HSD = data.frame(Comparison=row.names(TUK), 
+                 diff=TUK$diff, lwr=TUK$lwr, lwr=TUK$lwr, p.adj=TUK$p.adj)
+
+# remove redundant helper-df
+rm(TUK)
+
+HSD <- HSD %>%
+  mutate_at(vars(Comparison), ~ str_replace_all(., ":", "#"))
+
+cld <- cldList(p.adj ~ Comparison, data = HSD,
+               threshold = 0.05,
+               remove.space=FALSE)
+# remove redundant helper-df
+rm(HSD)
+
+cld <- cld %>% 
+  extract(Group, c("graft", "treatment"), "(.*(?=#)).*((?<=#).*)")
+
+plot_ion_leakage <- df_ion_leakage %>%
+  dplyr::select(plantID, graft, treatment, ion_leakage) %>%
+  group_by(treatment, graft) %>%
+  summarise(mean = mean(ion_leakage),
+            sd = sd(ion_leakage),
+            se = sd(ion_leakage) / sqrt(n()),
+            max = mean+se,
+            min = mean-se,
+            .groups = "drop")
+
+plot_ion_leakage <- cld %>%
+  dplyr::select(graft, treatment, Letter) %>%
+  right_join(plot_ion_leakage, 
+             by = c("graft" = "graft", "treatment" = "treatment"))
+rm (cld)
+
+plot_ion_leakage %>%
+  # basic barplot
+  ggplot(aes(fill=graft, y=mean, x=treatment)) + 
+  geom_bar(position="dodge", 
+           stat="identity") +
+  # setting y-scale name, limits, breaks and sequencing
+  scale_y_continuous(name="Mittlerer Ionenaustritt [%]") +
+  scale_fill_manual(values = group.colors,
+                    name = "Veredelung (U/E)") +
+  scale_x_discrete(labels= c("Kontrolle","Hitzestress")) +
+  xlab("Behandlung") +
+  # adding errorbar and ns. label
+  geom_errorbar(aes(ymin=min-sd, ymax=max+sd), 
+                position=position_dodge(.9), 
+                width=0.3) +
+   
+  geom_text(aes(label = str_trim(Letter), 
+                y = mean + sd), 
+            vjust = -1.5, 
+            position=position_dodge(.9)) +
+  # adding color and changing to more minimal theme
+  theme_classic() +
+  coord_cartesian(clip = "off") +
+  theme(text = element_text(size = 8),
+        axis.text = element_text(size = 8),
+        legend.title = element_text(size=8),
+        legend.text = element_text(size=5),
+        legend.position = "bottom")
+ggsave("barplot_ion_leakage.png", path = "../Output/Plots/", device = "png", width = 77.5, height = 116.20, units=c("mm"), dpi = 300)
+
+rm(list = ls(pattern = "^plot"))
+```
